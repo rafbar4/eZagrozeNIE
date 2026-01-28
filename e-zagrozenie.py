@@ -1,4 +1,4 @@
-orimport streamlit as st
+import streamlit as st
 import pandas as pd
 import numpy as np
 import requests
@@ -596,4 +596,5 @@ else:
     col1, col2, col3 = st.columns([1, 2, 1])
     with col2: 
         st.image("pl.gif", use_container_width=True)
+
 
