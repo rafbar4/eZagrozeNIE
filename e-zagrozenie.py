@@ -31,7 +31,7 @@ ROUTE_SIMPLIFICATION_TOLERANCE = 0.0001  # Simplify route geometry
 # --- OPTIMIZED DATA LOADING WITH SPATIAL INDEX ---
 @st.cache_data
 def load_all_data():
-    df = pd.read_csv("dane_wypadki_2018_2024.csv")
+    df = pd.read_csv("dane_scalone.csv")
     # Pre-convert timestamps to datetime for faster repeated access
     if 'unix_time' in df.columns:
         df['datetime'] = pd.to_datetime(df['unix_time'], unit='s')
@@ -650,3 +650,4 @@ else:
     col1, col2, col3 = st.columns([1, 2, 1])
     with col2: 
         st.image("pl.gif", use_container_width=True)
+
