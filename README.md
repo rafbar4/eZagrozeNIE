@@ -1,4 +1,4 @@
-# eZagrozeNIE - Road Risk Platform / Platforma Zagrożeń Drogowych
+# e-ZagrożeNIE - Road Risk Platform / Platforma Zagrożeń Drogowych
 
 ## Link to the Website:  https://e-zagrozenie.streamlit.app
 
@@ -22,6 +22,7 @@ eZagrozeNIE is a web application built with Python and the Streamlit framework, 
 * Machine Learning: Scikit-learn (Logistic Regression)
 * Data Source: Historical road accident dataset (CSV format)
 
+* To use the dataset for the Lubuskie Voivodeship covering the years 2018–2024, change the filename in e-zagrozenie.py to **dane_wypadki_2018_2024.csv**; however, please note that the application may run slower as a result.
 ---
 
 ## Wersja Polska
@@ -29,7 +30,7 @@ eZagrozeNIE is a web application built with Python and the Streamlit framework, 
 ## Link do storny internetowej:  https://e-zagrozenie.streamlit.app
 
 ### Opis Projektu
-eZagrozeNIE to aplikacja webowa stworzona w języku Python z wykorzystaniem frameworka Streamlit, służąca do analizy wypadków drogowych na trasach w województwie lubuskim. System pozwala użytkownikowi wyznaczyć trasę między dwoma punktami i sprawdza historyczne dane o zdarzeniach drogowych w buforze bezpieczeństwa wzdłuż wybranej trasy.
+e-ZagrożeNIE to aplikacja webowa stworzona w języku Python z wykorzystaniem frameworka Streamlit, służąca do analizy wypadków drogowych na trasach w województwie lubuskim. System pozwala użytkownikowi wyznaczyć trasę między dwoma punktami i sprawdza historyczne dane o zdarzeniach drogowych w buforze bezpieczeństwa wzdłuż wybranej trasy.
 
 ### Główne Funkcje
 * Wyznaczanie tras: Integracja z API OSRM w celu dostarczenia trasy głównej oraz opcji alternatywnych.
@@ -46,6 +47,7 @@ eZagrozeNIE to aplikacja webowa stworzona w języku Python z wykorzystaniem fram
 * Uczenie maszynowe: Scikit-learn (Logistic Regression)
 * Źródło danych: Historyczny zbiór danych o wypadkach drogowych (format CSV)
 
+* Aby korzystać z danych dla województwa lubuskiego z lat 2018–2024, należy w pliku e-zagrozenie.py zmienić nazwę wczytywanego pliku na **dane_wypadki_2018_2024.csv**, jednak miej na uwadze, że aplikacja może wtedy działać wolniej.
 ---
 
 ### Local Installation / Instalacja lokalna
