@@ -26,7 +26,7 @@ st.markdown(
 )
 
 MAX_DISTANCE_DEGREES = 0.001
-ROUTE_SIMPLIFICATION_TOLERANCE = 0.0001  # Simplify route geometry
+#ROUTE_SIMPLIFICATION_TOLERANCE = 0.0001  # Simplify route geometry
 
 # --- OPTIMIZED DATA LOADING WITH SPATIAL INDEX ---
 @st.cache_data
@@ -674,5 +674,6 @@ if not res["acc"].empty:
             f"</p>", 
             unsafe_allow_html=True
         )
+
 
 
