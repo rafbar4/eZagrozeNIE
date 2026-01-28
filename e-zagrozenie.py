@@ -43,13 +43,19 @@ def load_all_data():
     return df
 
 @st.cache_data
-def build_spatial_index():
+def build_spatial_index(data):
     """Build KD-tree for ultra-fast spatial queries."""
-    coords = all_data[['gps_y_dec', 'gps_x_dec']].values
+    # Remove rows with missing coordinates
+    clean_data = data.dropna(subset=['gps_y_dec', 'gps_x_dec'])
+    coords = clean_data[['gps_y_dec', 'gps_x_dec']].values
+    
+    if len(coords) == 0:
+        return None
+    
     return cKDTree(coords)
 
 all_data = load_all_data()
-spatial_index = build_spatial_index()
+spatial_index = build_spatial_index(all_data)
 
 # --- OPTIMIZED STREET FUNCTIONS ---
 def fetch_street_suggestions(query: str) -> list[str]:
@@ -130,6 +136,10 @@ def fetch_accidents_fast(route_coords):
     if not route_coords:
         return pd.DataFrame()
     
+    # Fallback to regular method if spatial index is not available
+    if spatial_index is None:
+        return fetch_accidents_fallback(route_coords)
+    
     # Simplify route first to reduce computation
     simplified_coords = simplify_route(route_coords)
     
@@ -140,36 +150,82 @@ def fetch_accidents_fast(route_coords):
     # Using KD-tree query_ball_point for ultra-fast spatial search
     search_radius = MAX_DISTANCE_DEGREES * 1.5  # Slightly larger to catch all
     
-    # Query all route points at once
-    nearby_indices_list = spatial_index.query_ball_point(route_points, search_radius)
+    try:
+        # Query all route points at once
+        nearby_indices_list = spatial_index.query_ball_point(route_points, search_radius)
+        
+        # Flatten and get unique indices
+        nearby_indices = set()
+        for indices in nearby_indices_list:
+            nearby_indices.update(indices)
+        
+        if not nearby_indices:
+            return pd.DataFrame()
+        
+        # Get accidents from indices
+        nearby_indices = list(nearby_indices)
+        df = all_data.iloc[nearby_indices].copy()
+        
+        # Refine with exact distance calculation (vectorized)
+        accident_points = df[['gps_y_dec', 'gps_x_dec']].values
+        
+        # Calculate minimum distance to any route segment
+        min_distances = np.full(len(df), np.inf)
+        
+        for i in range(len(simplified_coords) - 1):
+            distances = vectorized_point_to_segment_distances(
+                accident_points,
+                simplified_coords[i],
+                simplified_coords[i + 1]
+            )
+            min_distances = np.minimum(min_distances, distances)
+        
+        # Filter by exact threshold
+        mask = min_distances <= MAX_DISTANCE_DEGREES
+        result_df = df[mask].copy()
+        
+        if not result_df.empty:
+            result_df = result_df.rename(columns={'gps_y_dec': 'lat', 'gps_x_dec': 'lon'})
+            result_df["Odległość [m]"] = (min_distances[mask] * 111000).round(1)
+            return result_df.drop_duplicates(subset=["id"])
+        
+    except Exception as e:
+        # Fallback to regular method if spatial index query fails
+        return fetch_accidents_fallback(route_coords)
     
-    # Flatten and get unique indices
-    nearby_indices = set()
-    for indices in nearby_indices_list:
-        nearby_indices.update(indices)
-    
-    if not nearby_indices:
+    return pd.DataFrame()
+
+def fetch_accidents_fallback(route_coords):
+    """Fallback method without spatial index."""
+    if not route_coords:
         return pd.DataFrame()
     
-    # Get accidents from indices
-    nearby_indices = list(nearby_indices)
-    df = all_data.iloc[nearby_indices].copy()
+    lats, lons = [p[0] for p in route_coords], [p[1] for p in route_coords]
     
-    # Refine with exact distance calculation (vectorized)
+    # Quick bounding box filter
+    mask = (all_data['gps_y_dec'].between(min(lats)-0.01, max(lats)+0.01)) & \
+           (all_data['gps_x_dec'].between(min(lons)-0.01, max(lons)+0.01))
+    
+    df = all_data[mask].copy()
+    
+    if df.empty: 
+        return pd.DataFrame()
+    
+    # Prepare point array once
     accident_points = df[['gps_y_dec', 'gps_x_dec']].values
-    
-    # Calculate minimum distance to any route segment
     min_distances = np.full(len(df), np.inf)
     
-    for i in range(len(simplified_coords) - 1):
+    # Vectorized distance calculation for all segments
+    simplified_coords = simplify_route(route_coords)
+    for i in range(len(simplified_coords)-1):
         distances = vectorized_point_to_segment_distances(
             accident_points,
             simplified_coords[i],
-            simplified_coords[i + 1]
+            simplified_coords[i+1]
         )
         min_distances = np.minimum(min_distances, distances)
     
-    # Filter by exact threshold
+    # Filter by threshold
     mask = min_distances <= MAX_DISTANCE_DEGREES
     result_df = df[mask].copy()
     
