@@ -5,7 +5,7 @@
 ## English Version
 
 ### Project Description
-eZagrozeNIE is a web application built with Python and the Streamlit framework, designed to analyze road accidents on specific routes within the Lubuskie Voivodeship. The system allows users to calculate routes between two points and checks historical accident data within a safety buffer along those paths.
+e-ZagrożeNIE is a web application built with Python and the Streamlit framework, designed to analyze road accidents on specific routes within the Lubuskie Voivodeship. The system allows users to calculate routes between two points and checks historical accident data within a safety buffer along those paths.
 
 ### Key Features
 * Route Planning: Integration with the OSRM API to provide primary and alternative routing options.
@@ -63,3 +63,5 @@ e-ZagrożeNIE to aplikacja webowa stworzona w języku Python z wykorzystaniem fr
 
 Project developed as part of university coursework at the Faculty of Mathematics and Computer Science (WMI), Adam Mickiewicz University in Poznan.
 Projekt przygotowany w ramach zajęć na Wydziale Matematyki i Informatyki (WMI) Uniwersytetu im. Adama Mickiewicza w Poznaniu.
+
+## Authors: Rafał Bartosik, Paweł Kopytek, Mateusz Witkowski, Aleks Stępniak, Miłosz Przymusiński
