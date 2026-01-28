@@ -31,7 +31,7 @@ ROUTE_SIMPLIFICATION_TOLERANCE = 0.0001  # Simplify route geometry
 # --- OPTIMIZED DATA LOADING WITH SPATIAL INDEX ---
 @st.cache_data
 def load_all_data():
-    df = pd.read_csv("dane_wypadki_export_2024.csv")
+    df = pd.read_csv("dane_wypadki_2018_2024.csv")
     # Pre-convert timestamps to datetime for faster repeated access
     if 'unix_time' in df.columns:
         df['datetime'] = pd.to_datetime(df['unix_time'], unit='s')
@@ -129,6 +129,52 @@ def simplify_route(coords: List[Tuple[float, float]], tolerance: float = ROUTE_S
             return [points[0], points[-1]]
     
     return rdp(coords, tolerance)
+
+# --- SNAP ACCIDENTS TO ROUTE (VECTORIZED) ---
+def snap_accidents_to_route(accidents_df, route_coords):
+    """Snap accident markers to the nearest point on the route for better visualization."""
+    if accidents_df.empty or not route_coords:
+        return accidents_df
+    
+    result_df = accidents_df.copy()
+    accident_points = accidents_df[['lat', 'lon']].values
+    
+    # Vectorized snapping - find closest point on route for each accident
+    num_accidents = len(accident_points)
+    snapped_points = np.zeros((num_accidents, 2))
+    
+    # For each accident, find minimum distance to all segments (vectorized)
+    for accident_idx in range(num_accidents):
+        p = accident_points[accident_idx]
+        min_distance = np.inf
+        closest_point = p
+        
+        # Vectorize across all segments
+        for i in range(len(route_coords) - 1):
+            a = np.array(route_coords[i])
+            b = np.array(route_coords[i + 1])
+            
+            ab = b - a
+            denom = np.dot(ab, ab)
+            
+            if denom == 0:
+                snap_point = a
+            else:
+                t = np.clip(np.dot(p - a, ab) / denom, 0, 1)
+                snap_point = a + t * ab
+            
+            distance = np.linalg.norm(p - snap_point)
+            
+            if distance < min_distance:
+                min_distance = distance
+                closest_point = snap_point
+        
+        snapped_points[accident_idx] = closest_point
+    
+    result_df['display_lat'] = snapped_points[:, 0]
+    result_df['display_lon'] = snapped_points[:, 1]
+    
+    return result_df
 
 # --- ULTRA-FAST SPATIAL QUERY USING KD-TREE ---
 def fetch_accidents_fast(route_coords):
@@ -525,10 +571,18 @@ if st.session_state.result:
                      icon=folium.Icon(color="orange", icon="map-pin")).add_to(m)
 
     if not res["acc"].empty:
+        # Snap accidents to route for better visualization
+        accidents_snapped = snap_accidents_to_route(res["acc"], res["coords"])
+        
         cluster = MarkerCluster(options={'maxClusterRadius': 50}).add_to(m)
-        for _, row in res["acc"].iterrows():
-            folium.CircleMarker((row["lat"], row["lon"]), radius=5, color="red", fill=True, 
-                              tooltip=(
+        for _, row in accidents_snapped.iterrows():
+            folium.CircleMarker(
+                (row["display_lat"], row["display_lon"]), 
+                radius=5, 
+                color="red", 
+                fill=True,
+                fillOpacity=0.8,
+                tooltip=(
                 f"Wypadek<br>"
                 f"Miejscowość: {row['miejscowosc']}<br>"
                 f"Ulica: {row['ulica']}<br>"
@@ -596,5 +650,3 @@ else:
     col1, col2, col3 = st.columns([1, 2, 1])
     with col2: 
         st.image("pl.gif", use_container_width=True)
-
-
