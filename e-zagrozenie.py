@@ -303,7 +303,20 @@ def calculate_probability(accidents_df):
     if accidents_df.empty:
         return None
     
-    # Use pre-computed time columns
+    # Check if time columns exist, if not compute them
+    if 'hour' not in accidents_df.columns:
+        if 'unix_time' in accidents_df.columns:
+            accidents_df = accidents_df.copy()
+            accidents_df['datetime'] = pd.to_datetime(accidents_df['unix_time'], unit='s')
+            accidents_df['hour'] = accidents_df['datetime'].dt.hour
+            accidents_df['day'] = accidents_df['datetime'].dt.day
+            accidents_df['month'] = accidents_df['datetime'].dt.month
+            accidents_df['year'] = accidents_df['datetime'].dt.year
+            accidents_df['weekday'] = accidents_df['datetime'].dt.weekday + 1
+        else:
+            return None
+    
+    # Use time columns
     final_dataframe = accidents_df[['lon', 'hour', 'day', 'month', 'year', 'weekday']].copy()
     
     # Vectorized time categorization
