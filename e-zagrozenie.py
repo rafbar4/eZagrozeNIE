@@ -9,6 +9,7 @@ import warnings
 from typing import List, Tuple, Optional
 from sklearn.linear_model import LogisticRegression
 import datetime
+from scipy.spatial import cKDTree
 
 # --- KONFIGURACJA ---
 warnings.filterwarnings("ignore")
@@ -25,8 +26,9 @@ st.markdown(
 )
 
 MAX_DISTANCE_DEGREES = 0.001
+ROUTE_SIMPLIFICATION_TOLERANCE = 0.0001  # Simplify route geometry
 
-# --- OPTIMIZED DATA LOADING ---
+# --- OPTIMIZED DATA LOADING WITH SPATIAL INDEX ---
 @st.cache_data
 def load_all_data():
     df = pd.read_csv("dane_wypadki_2018_2024.csv")
@@ -40,7 +42,14 @@ def load_all_data():
         df['weekday'] = df['datetime'].dt.weekday + 1
     return df
 
+@st.cache_data
+def build_spatial_index():
+    """Build KD-tree for ultra-fast spatial queries."""
+    coords = all_data[['gps_y_dec', 'gps_x_dec']].values
+    return cKDTree(coords)
+
 all_data = load_all_data()
+spatial_index = build_spatial_index()
 
 # --- OPTIMIZED STREET FUNCTIONS ---
 def fetch_street_suggestions(query: str) -> list[str]:
@@ -64,6 +73,113 @@ def street_to_coords(street_city: str) -> Optional[Tuple[float, float]]:
     except: 
         return None
 
+# --- ROUTE SIMPLIFICATION (RAMER-DOUGLAS-PEUCKER) ---
+def simplify_route(coords: List[Tuple[float, float]], tolerance: float = ROUTE_SIMPLIFICATION_TOLERANCE) -> List[Tuple[float, float]]:
+    """Simplify route to reduce number of points while preserving shape."""
+    if len(coords) <= 2:
+        return coords
+    
+    def perpendicular_distance(point, line_start, line_end):
+        """Calculate perpendicular distance from point to line."""
+        if line_start == line_end:
+            return np.linalg.norm(np.array(point) - np.array(line_start))
+        
+        p = np.array(point)
+        s = np.array(line_start)
+        e = np.array(line_end)
+        
+        line_vec = e - s
+        point_vec = p - s
+        line_len = np.linalg.norm(line_vec)
+        line_unitvec = line_vec / line_len
+        
+        point_vec_scaled = point_vec / line_len
+        t = np.dot(line_unitvec, point_vec_scaled)
+        
+        if t < 0.0:
+            return np.linalg.norm(point_vec)
+        elif t > 1.0:
+            return np.linalg.norm(p - e)
+        
+        nearest = s + t * line_vec
+        return np.linalg.norm(p - nearest)
+    
+    def rdp(points, epsilon):
+        """Ramer-Douglas-Peucker algorithm."""
+        dmax = 0.0
+        index = 0
+        
+        for i in range(1, len(points) - 1):
+            d = perpendicular_distance(points[i], points[0], points[-1])
+            if d > dmax:
+                index = i
+                dmax = d
+        
+        if dmax > epsilon:
+            left = rdp(points[:index + 1], epsilon)
+            right = rdp(points[index:], epsilon)
+            return left[:-1] + right
+        else:
+            return [points[0], points[-1]]
+    
+    return rdp(coords, tolerance)
+
+# --- ULTRA-FAST SPATIAL QUERY USING KD-TREE ---
+def fetch_accidents_fast(route_coords):
+    """Ultra-fast accident fetching using spatial index."""
+    if not route_coords:
+        return pd.DataFrame()
+    
+    # Simplify route first to reduce computation
+    simplified_coords = simplify_route(route_coords)
+    
+    # Query spatial index with all route points at once
+    route_points = np.array(simplified_coords)
+    
+    # Find all accidents within distance threshold of any route point
+    # Using KD-tree query_ball_point for ultra-fast spatial search
+    search_radius = MAX_DISTANCE_DEGREES * 1.5  # Slightly larger to catch all
+    
+    # Query all route points at once
+    nearby_indices_list = spatial_index.query_ball_point(route_points, search_radius)
+    
+    # Flatten and get unique indices
+    nearby_indices = set()
+    for indices in nearby_indices_list:
+        nearby_indices.update(indices)
+    
+    if not nearby_indices:
+        return pd.DataFrame()
+    
+    # Get accidents from indices
+    nearby_indices = list(nearby_indices)
+    df = all_data.iloc[nearby_indices].copy()
+    
+    # Refine with exact distance calculation (vectorized)
+    accident_points = df[['gps_y_dec', 'gps_x_dec']].values
+    
+    # Calculate minimum distance to any route segment
+    min_distances = np.full(len(df), np.inf)
+    
+    for i in range(len(simplified_coords) - 1):
+        distances = vectorized_point_to_segment_distances(
+            accident_points,
+            simplified_coords[i],
+            simplified_coords[i + 1]
+        )
+        min_distances = np.minimum(min_distances, distances)
+    
+    # Filter by exact threshold
+    mask = min_distances <= MAX_DISTANCE_DEGREES
+    result_df = df[mask].copy()
+    
+    if not result_df.empty:
+        result_df = result_df.rename(columns={'gps_y_dec': 'lat', 'gps_x_dec': 'lon'})
+        result_df["Odległość [m]"] = (min_distances[mask] * 111000).round(1)
+        return result_df.drop_duplicates(subset=["id"])
+    
+    return pd.DataFrame()
+
 # --- VECTORIZED GEOMETRY FUNCTIONS ---
 def vectorized_point_to_segment_distances(points: np.ndarray, segment_start: Tuple[float, float], 
                                          segment_end: Tuple[float, float]) -> np.ndarray:
@@ -81,46 +197,6 @@ def vectorized_point_to_segment_distances(points: np.ndarray, segment_start: Tup
     t = np.clip(np.dot(P - A, AB) / denom, 0, 1)
     closest = A + t[:, np.newaxis] * AB
     return np.linalg.norm(P - closest, axis=1)
-
-def fetch_accidents(route_coords):
-    """Optimized accident fetching with vectorized distance calculations."""
-    if not route_coords:
-        return pd.DataFrame()
-    
-    lats, lons = [p[0] for p in route_coords], [p[1] for p in route_coords]
-    
-    # Quick bounding box filter
-    mask = (all_data['gps_y_dec'].between(min(lats)-0.01, max(lats)+0.01)) & \
-           (all_data['gps_x_dec'].between(min(lons)-0.01, max(lons)+0.01))
-    
-    df = all_data[mask].copy()
-    
-    if df.empty: 
-        return pd.DataFrame()
-    
-    # Prepare point array once
-    accident_points = df[['gps_y_dec', 'gps_x_dec']].values
-    min_distances = np.full(len(df), np.inf)
-    
-    # Vectorized distance calculation for all segments
-    for i in range(len(route_coords)-1):
-        distances = vectorized_point_to_segment_distances(
-            accident_points,
-            route_coords[i],
-            route_coords[i+1]
-        )
-        min_distances = np.minimum(min_distances, distances)
-    
-    # Filter by threshold
-    mask = min_distances <= MAX_DISTANCE_DEGREES
-    result_df = df[mask].copy()
-    
-    if not result_df.empty:
-        result_df = result_df.rename(columns={'gps_y_dec': 'lat', 'gps_x_dec': 'lon'})
-        result_df["Odległość [m]"] = (min_distances[mask] * 111000).round(1)
-        return result_df.drop_duplicates(subset=["id"])
-    
-    return pd.DataFrame()
 
 # --- OSRM ROUTING WITH SESSION REUSE ---
 @st.cache_data(show_spinner=False)
@@ -267,6 +343,7 @@ if "via_point" not in st.session_state: st.session_state.via_point = None
 if "pending_point" not in st.session_state: st.session_state.pending_point = None
 if "show_table" not in st.session_state: st.session_state.show_table = False
 if "selected_route_idx" not in st.session_state: st.session_state.selected_route_idx = 0
+if "accidents_loaded" not in st.session_state: st.session_state.accidents_loaded = False
 
 # --- SIDEBAR ---
 with st.sidebar:
@@ -297,14 +374,19 @@ with st.sidebar:
         if start_pt and end_pt:
             st.session_state.via_point = None
             st.session_state.pending_point = None
-            with st.spinner("Analizowanie tras..."):
+            st.session_state.accidents_loaded = False
+            
+            # INSTANT ROUTE DISPLAY - Get routes immediately without accidents
+            with st.spinner("Wyznaczanie tras..."):
                 routes = get_osrm_routes(start_pt, end_pt)
+                
+                # Store routes WITHOUT accidents first (instant display)
                 results = []
                 for r in routes:
-                    acc_df = fetch_accidents(r["coords"])
-                    r["acc"] = acc_df
-                    r["acc_count"] = len(acc_df)
+                    r["acc"] = pd.DataFrame()  # Empty for now
+                    r["acc_count"] = 0
                     results.append(r)
+                
                 st.session_state.result = results
                 st.session_state.base_result = results        
                 st.session_state.selected_route_idx = 0
@@ -316,6 +398,17 @@ with st.sidebar:
 # --- MAIN RESULTS ---
 if st.session_state.result:
     routes = st.session_state.result
+
+    # Load accidents progressively AFTER displaying routes
+    if not st.session_state.accidents_loaded:
+        with st.spinner("Ładowanie danych o wypadkach..."):
+            for r in routes:
+                acc_df = fetch_accidents_fast(r["coords"])
+                r["acc"] = acc_df
+                r["acc_count"] = len(acc_df)
+            st.session_state.result = routes
+            st.session_state.accidents_loaded = True
+            st.rerun()
 
     cols = st.columns(len(routes))
     for i, r in enumerate(routes):
@@ -335,6 +428,7 @@ if st.session_state.result:
             st.session_state.selected_route_idx = 0
             st.session_state.via_point = None
             st.session_state.pending_point = None
+            st.session_state.accidents_loaded = True
             st.rerun()
 
     st.markdown(
@@ -390,15 +484,16 @@ if st.session_state.result:
                 if st.session_state.base_result is None:
                     st.session_state.base_result = st.session_state.result
                 st.session_state.via_point = st.session_state.pending_point
-                with st.spinner("Analizuję i przeliczam trasę..."):
+                st.session_state.accidents_loaded = False
+                
+                with st.spinner("Wyznaczanie nowej trasy..."):
                     new_routes = get_osrm_routes(st.session_state.start_pt, 
                                                 st.session_state.end_pt, 
                                                 st.session_state.via_point)
                     res_new = []
                     for r in new_routes:
-                        acc = fetch_accidents(r["coords"])
-                        r["acc"] = acc
-                        r["acc_count"] = len(acc)
+                        r["acc"] = pd.DataFrame()
+                        r["acc_count"] = 0
                         res_new.append(r)
                     st.session_state.result = res_new
                     st.session_state.selected_route_idx = 0
